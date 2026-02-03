@@ -93,7 +93,7 @@ jobs:
         cd build && ninja
     - uses: actions/upload-artifact@v4
       with:
-        name: aseprite
+        name: aseprite-${{ github.run_id }}-${{ github.job }}-${{ matrix.build_type }}-${{ matrix.ui }}-${{ matrix.scripting }}
         path: |
           libcrypto-1_1-x64.dll
           build/bin/data
