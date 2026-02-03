@@ -1,5 +1,5 @@
 // Aseprite
-// Copyright (C) 2019-2022  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
@@ -23,12 +23,10 @@
 #include "app/doc.h"
 #include "app/site.h"
 #include "app/util/cel_ops.h"
-#include "app/util/range_utils.h"
 #include "base/debug.h"
 #include "doc/algorithm/shrink_bounds.h"
 #include "doc/cel.h"
 #include "doc/image.h"
-#include "doc/image_impl.h"
 #include "doc/layer.h"
 #include "doc/layer_tilemap.h"
 #include "doc/primitives.h"
@@ -118,9 +116,8 @@ ExpandCelCanvas::ExpandCelCanvas(Site site,
   m_origCelPos = m_cel->position();
 
   // Region to draw
-  gfx::Rect celBounds = (m_celCreated ? m_sprite->bounds() : m_cel->bounds());
-
-  gfx::Rect spriteBounds(0, 0, m_sprite->width(), m_sprite->height());
+  const gfx::Rect spriteBounds = m_sprite->bounds();
+  const gfx::Rect celBounds = (m_celCreated ? spriteBounds : m_cel->bounds());
 
   if (tiledMode == TiledMode::NONE) { // Non-tiled
     m_bounds = celBounds.createUnion(spriteBounds);

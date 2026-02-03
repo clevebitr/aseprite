@@ -1,12 +1,19 @@
 // Aseprite
-// Copyright (C) 2018-2024  Igara Studio S.A.
+// Copyright (C) 2018-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
 // the End-User License Agreement for Aseprite.
 
+#include "app/tools/controller.h"
+#include "app/tools/intertwine.h"
+#include "app/tools/point_shape.h"
+#include "app/tools/tool_loop.h"
+#include "app/tools/tool_loop_modifiers.h"
 #include "base/pi.h"
+#include "doc/algorithm/polygon.h"
 #include "doc/layer_tilemap.h"
+#include "gfx/point.h"
 
 namespace app { namespace tools {
 
@@ -74,12 +81,6 @@ public:
 };
 
 class IntertwineAsLines : public Intertwine {
-  // It was introduced to know if joinStroke function
-  // was executed inmediatelly after a "Last" trace policy (i.e. after the
-  // user confirms a line draw while he is holding down the SHIFT key), so
-  // we have to ignore printing the first pixel of the line.
-  bool m_retainedTracePolicyLast = false;
-
   // In freehand-like tools, on each mouse movement we draw only the
   // line between the last two mouse points in the stroke (the
   // complete stroke is not re-painted again), so we want to indicate
@@ -90,22 +91,10 @@ class IntertwineAsLines : public Intertwine {
 public:
   bool snapByAngle() override { return true; }
 
-  void prepareIntertwine(ToolLoop* loop) override
-  {
-    m_retainedTracePolicyLast = false;
-    m_firstStroke = true;
-  }
+  void prepareIntertwine(ToolLoop* loop) override { m_firstStroke = true; }
 
   void joinStroke(ToolLoop* loop, const Stroke& stroke) override
   {
-    // Required for LineFreehand controller in the first stage, when
-    // we are drawing the line and the trace policy is "Last". Each
-    // new joinStroke() is like a fresh start.  Without this fix, the
-    // first stage on LineFreehand will draw a "star" like pattern
-    // with lines from the first point to the last point.
-    if (loop->getTracePolicy() == TracePolicy::Last)
-      m_retainedTracePolicyLast = true;
-
     if (stroke.size() == 0)
       return;
     else if (stroke.size() == 1) {
@@ -129,9 +118,10 @@ public:
       // when we use Shift+click in the Pencil tool to continue the
       // old stroke).
       // TODO useful only in the case when brush size = 1px
-      const int start =
-        (loop->getController()->isFreehand() && (m_retainedTracePolicyLast || !m_firstStroke) ? 1 :
-                                                                                                0);
+      const int start = (loop->getController()->isFreehand() &&
+                             ((loop->getTracePolicy() == TracePolicy::Last) || !m_firstStroke) ?
+                           1 :
+                           0);
 
       for (int c = start; c < pts.size(); ++c)
         doPointshapeStrokePt(pts[c], loop);
@@ -266,6 +256,12 @@ public:
           int y1 = stroke[c].y;
           int x2 = stroke[c + 1].x;
           int y2 = stroke[c + 1].y;
+
+          if (x1 > x2)
+            std::swap(x1, x2);
+          if (y1 > y2)
+            std::swap(y1, y2);
+
           bounds |= rotateRectangle(x1, y1, x2, y2, angle).bounds();
         }
       }
@@ -279,16 +275,22 @@ private:
   {
     int cx = (x1 + x2) / 2;
     int cy = (y1 + y2) / 2;
-    int a = (x2 - x1) / 2;
-    int b = (y2 - y1) / 2;
+    int a = (x2 - x1 + 1) / 2;
+    int b = (y2 - y1 + 1) / 2;
+
     double s = -std::sin(angle);
     double c = std::cos(angle);
 
+    int ac = a * c;
+    int bs = b * s;
+    int as = a * s;
+    int bc = b * c;
+
     Stroke stroke;
-    stroke.addPoint(Point(cx - a * c - b * s, cy + a * s - b * c));
-    stroke.addPoint(Point(cx + a * c - b * s, cy - a * s - b * c));
-    stroke.addPoint(Point(cx + a * c + b * s, cy - a * s + b * c));
-    stroke.addPoint(Point(cx - a * c + b * s, cy + a * s + b * c));
+    stroke.addPoint(gfx::Point(cx - ac - bs, cy + as - bc));
+    stroke.addPoint(gfx::Point(cx + ac - bs, cy - as - bc));
+    stroke.addPoint(gfx::Point(cx + ac + bs, cy - as + bc));
+    stroke.addPoint(gfx::Point(cx - ac + bs, cy + as + bc));
     return stroke;
   }
 };
@@ -372,7 +374,7 @@ public:
     const double angle = loop->getController()->getShapeAngle();
 
     if (ABS(angle) > 0.001) {
-      Point center = bounds.center();
+      gfx::Point center = bounds.center();
       int a = bounds.w / 2.0 + 0.5;
       int b = bounds.h / 2.0 + 0.5;
       double xd = a * a;
@@ -442,11 +444,6 @@ public:
 };
 
 class IntertwineAsPixelPerfect : public Intertwine {
-  // It was introduced to know if joinStroke function
-  // was executed inmediatelly after a "Last" trace policy (i.e. after the
-  // user confirms a line draw while he is holding down the SHIFT key), so
-  // we have to ignore printing the first pixel of the line.
-  bool m_retainedTracePolicyLast = false;
   Stroke m_pts;
   bool m_saveStrokeArea = false;
 
@@ -483,7 +480,6 @@ public:
   void prepareIntertwine(ToolLoop* loop) override
   {
     m_pts.reset();
-    m_retainedTracePolicyLast = false;
     m_grid = m_dstGrid = m_celGrid = loop->getGrid();
     m_restoredRegion.clear();
 
@@ -509,10 +505,8 @@ public:
     // new joinStroke() is like a fresh start.  Without this fix, the
     // first stage on LineFreehand will draw a "star" like pattern
     // with lines from the first point to the last point.
-    if (loop->getTracePolicy() == TracePolicy::Last) {
-      m_retainedTracePolicyLast = true;
+    if (loop->getTracePolicy() == TracePolicy::Last)
       m_pts.reset();
-    }
 
     int thirdFromLastPt = 0, nextPt = 0;
 
@@ -572,14 +566,18 @@ public:
       // a joinStroke pass with a retained "Last" trace policy
       // (i.e. the user confirms draw a line while he is holding
       // the SHIFT key))
-      if (c == 0 && m_retainedTracePolicyLast)
+      if (c == 0 && loop->getTracePolicy() == TracePolicy::Last)
         continue;
 
       // For the last point we need to store the source image content at that
       // point so we can restore it when erasing a point because of
       // pixel-perfect. So we set the following flag to indicate this, and
       // use it in doTransformPoint.
-      m_saveStrokeArea = (c == m_pts.size() - 1);
+      // The previous behavior isn't required for LineFreehand controller and
+      // the trace policy is "Last" (i.e. the user is drawing a line while
+      // he is holding the SHIFT key)
+      m_saveStrokeArea = (loop->getDstImage() &&
+                          ((c == m_pts.size() - 1) && loop->getTracePolicy() != TracePolicy::Last));
       if (m_saveStrokeArea) {
         clearPointshapeStrokePtAreas();
         setLastPtIndex(c);
@@ -627,7 +625,7 @@ private:
   void savePointshapeStrokePtArea(ToolLoop* loop, const tools::Stroke::Pt& pt)
   {
     gfx::Rect r;
-    loop->getPointShape()->getModifiedArea(loop, pt.x, pt.y, r);
+    loop->getPointShape()->getModifiedArea(loop, pt.x, pt.y, pt.symmetry, r);
 
     gfx::Region rgn(r);
     // By wrapping the modified area's position when tiled mode is active, the
@@ -698,7 +696,7 @@ private:
     ASSERT(m_tempTileset);
 
     gfx::Rect r;
-    loop->getPointShape()->getModifiedArea(loop, pt.x, pt.y, r);
+    loop->getPointShape()->getModifiedArea(loop, pt.x, pt.y, pt.symmetry, r);
 
     r.offset(-loop->getCelOrigin());
     auto tilesPts = m_dstGrid.tilesInCanvasRegion(gfx::Region(r));

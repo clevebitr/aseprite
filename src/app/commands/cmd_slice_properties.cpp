@@ -1,5 +1,5 @@
 // Aseprite
-// Copyright (C) 2019-2020  Igara Studio S.A.
+// Copyright (C) 2019-2023  Igara Studio S.A.
 // Copyright (C) 2017-2018  David Capello
 //
 // This program is distributed under the terms of
@@ -39,7 +39,7 @@ private:
 };
 
 SlicePropertiesCommand::SlicePropertiesCommand()
-  : Command(CommandId::SliceProperties(), CmdUIOnlyFlag)
+  : Command(CommandId::SliceProperties())
   , m_sliceId(NullId)
 {
 }
@@ -57,7 +57,7 @@ void SlicePropertiesCommand::onLoadParams(const Params& params)
 
 bool SlicePropertiesCommand::onEnabled(Context* context)
 {
-  return context->checkFlags(ContextFlags::ActiveDocumentIsWritable);
+  return context->isUIAvailable() && context->checkFlags(ContextFlags::ActiveDocumentIsWritable);
 }
 
 void SlicePropertiesCommand::onExecute(Context* context)
@@ -77,7 +77,7 @@ void SlicePropertiesCommand::onExecute(Context* context)
     if (slice)
       slices.insert(slice->id());
     else
-      slices = reader.site()->selectedSlices();
+      slices = reader.site().selectedSlices();
   }
 
   // Nothing to delete

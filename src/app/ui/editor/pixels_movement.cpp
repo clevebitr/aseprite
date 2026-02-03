@@ -1,5 +1,5 @@
 // Aseprite
-// Copyright (C) 2019-2024  Igara Studio S.A.
+// Copyright (C) 2019-2025  Igara Studio S.A.
 // Copyright (C) 2001-2018  David Capello
 //
 // This program is distributed under the terms of
@@ -31,7 +31,6 @@
 #include "app/util/cel_ops.h"
 #include "app/util/expand_cel_canvas.h"
 #include "app/util/new_image_from_mask.h"
-#include "app/util/range_utils.h"
 #include "base/pi.h"
 #include "doc/algorithm/flip_image.h"
 #include "doc/algorithm/rotate.h"
@@ -131,9 +130,9 @@ PixelsMovement::PixelsMovement(Context* context,
   // TODO: enable TilemapMode exchanges during PixelMovement.
   if (m_site.layer()->isTilemap() && ColorBar::instance())
     ColorBar::instance()->lockTilemapMode();
-  double cornerThick = (m_site.tilemapMode() == TilemapMode::Tiles) ?
-                         CORNER_THICK_FOR_TILEMAP_MODE :
-                         CORNER_THICK_FOR_PIXELS_MODE;
+  const float cornerThick = (m_site.tilemapMode() == TilemapMode::Tiles ?
+                               CORNER_THICK_FOR_TILEMAP_MODE :
+                               CORNER_THICK_FOR_PIXELS_MODE);
   Transformation transform(mask->bounds(), cornerThick);
   set_pivot_from_preferences(transform);
 
@@ -179,7 +178,7 @@ bool PixelsMovement::editMultipleCels() const
 {
   return (m_site.range().enabled() &&
           (Preferences::instance().selection.multicelWhenLayersOrFrames() ||
-           m_site.range().type() == DocRange::kCels));
+           m_site.range().type() == view::Range::kCels));
 }
 
 void PixelsMovement::setDelegate(PixelsMovementDelegate* delegate)
@@ -421,10 +420,12 @@ void PixelsMovement::moveImage(const gfx::PointF& pos, MoveModifier moveModifier
         // Now we calculate the difference from x1,y1 point and we can
         // use it to adjust all coordinates (x1, y1, x2, y2).
         bounds.setOrigin(gridOffset);
+        newTransformation.pivot(abs_initial_pivot - m_initialData.bounds().origin() + gridOffset);
       }
+      else
+        newTransformation.pivot(abs_initial_pivot + gfx::PointF(dx, dy));
 
       newTransformation.bounds(bounds);
-      newTransformation.pivot(abs_initial_pivot + gfx::PointF(dx, dy));
       break;
     }
 
@@ -617,6 +618,9 @@ void PixelsMovement::moveImage(const gfx::PointF& pos, MoveModifier moveModifier
       gfx::PointF pivot((pivotPoint.x - bounds.x) / ABS(bounds.w),
                         (pivotPoint.y - bounds.y) / ABS(bounds.h));
 
+      // Smallest value possible, used for limit calculations
+      const double eps = 0.00001;
+
       // Vector from AB (or CD), and AC (or BD)
       vec2 u = to_vec2(B - A);
       vec2 v = to_vec2(C - A);
@@ -651,7 +655,7 @@ void PixelsMovement::moveImage(const gfx::PointF& pos, MoveModifier moveModifier
           C.y += delta.y;
 
           vec2 toPivot = to_vec2(pivotPoint - (A * (1.0 - pivot.y) + C * pivot.y));
-          vec2 toOtherSide = toPivot / (std::fabs(pivot.x) > 0.00001 ? pivot.x : 1.0);
+          vec2 toOtherSide = toPivot / (std::fabs(pivot.x) > eps ? pivot.x : 1.0);
           B = A + to_point(toOtherSide);
           D = C + to_point(toOtherSide);
           break;
@@ -664,7 +668,7 @@ void PixelsMovement::moveImage(const gfx::PointF& pos, MoveModifier moveModifier
           D.y += delta.y;
 
           vec2 toPivot = to_vec2(pivotPoint - (B * (1.0 - pivot.y) + D * pivot.y));
-          vec2 toOtherSide = toPivot / (std::fabs(1.0 - pivot.x) > 0.00001 ? (1.0 - pivot.x) : 1.0);
+          vec2 toOtherSide = toPivot / (std::fabs(1.0 - pivot.x) > eps ? (1.0 - pivot.x) : 1.0);
           A = B + to_point(toOtherSide);
           C = D + to_point(toOtherSide);
           break;
@@ -693,11 +697,15 @@ void PixelsMovement::moveImage(const gfx::PointF& pos, MoveModifier moveModifier
         case SkewWHandle:
         case SkewEHandle: {
           vec2 AB = to_vec2(B - A);
-          bounds.w = AB.magnitude();
+          // Clamping bounds width to prevent a segfault with some extreme transforms
+          bounds.w = std::min(AB.magnitude(), m_initialData.bounds().w * 10);
           bounds.x = pivotPoint.x - bounds.w * pivot.x;
 
           // New rotation angle is the angle between AB points
           newTransformation.angle(-AB.angle());
+
+          // Limit for pivot.x to prevent the 'stretch to infinity' bug
+          const double limit = (std::fabs(pivot.x) >= 1.0 ? (1.0 - eps) * SGN(pivot.x) : pivot.x);
 
           // New skew angle is the angle between AC0 (vector from A to
           // B rotated 45 degrees, like an AC vector without skew) and
@@ -713,7 +721,7 @@ void PixelsMovement::moveImage(const gfx::PointF& pos, MoveModifier moveModifier
           //  |   / <- AC0=AB rotated 45 degrees, if pivot is here
           //  | /
           //  C
-          auto ABp = A * (1.0 - pivot.x) + B * pivot.x;
+          auto ABp = A * (1.0 - limit) + B * limit;
           AC0 = vec2(ABp.y - B.y, B.x - ABp.x);
           AC = to_vec2(C - A);
 
@@ -1410,7 +1418,7 @@ CelList PixelsMovement::getEditableCels()
   CelList cels;
 
   if (editMultipleCels()) {
-    cels = get_unique_cels_to_edit_pixels(m_site.sprite(), m_site.range());
+    cels = m_site.selectedUniqueCelsToEditPixels();
   }
   else {
     // TODO This case is used in paste too, where the cel() can be

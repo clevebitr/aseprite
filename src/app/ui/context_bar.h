@@ -1,5 +1,5 @@
 // Aseprite
-// Copyright (C) 2018-2022  Igara Studio S.A.
+// Copyright (C) 2018-2025  Igara Studio S.A.
 // Copyright (C) 2001-2017  David Capello
 //
 // This program is distributed under the terms of
@@ -17,6 +17,8 @@
 #include "app/tools/tool_loop_modifiers.h"
 #include "app/ui/context_bar_observer.h"
 #include "app/ui/doc_observer_widget.h"
+#include "app/ui/dockable.h"
+#include "app/ui/font_entry.h"
 #include "doc/brush.h"
 #include "obs/connection.h"
 #include "obs/observable.h"
@@ -52,13 +54,15 @@ class Tool;
 class BrushSlot;
 class ColorBar;
 class DitheringSelector;
+class FontInfo;
 class GradientTypeSelector;
 class SamplingSelector;
 class Transformation;
 
 class ContextBar : public DocObserverWidget<ui::HBox>,
                    public obs::observable<ContextBarObserver>,
-                   public tools::ActiveToolObserver {
+                   public tools::ActiveToolObserver,
+                   public Dockable {
 public:
   ContextBar(ui::TooltipManager* tooltipManager, ColorBar* colorBar);
   ~ContextBar();
@@ -86,6 +90,10 @@ public:
 
   void setInkType(tools::InkType type);
 
+  // For text tool
+  FontInfo fontInfo() const;
+  FontEntry* fontEntry();
+
   // For gradients
   render::DitheringMatrix ditheringMatrix();
   render::DitheringAlgorithmBase* ditheringAlgorithm();
@@ -94,8 +102,13 @@ public:
   // For freehand with dynamics
   const tools::DynamicsOptions& getDynamics() const;
 
+  // Dockable impl
+  int dockableAt() const override { return ui::TOP | ui::BOTTOM; }
+  int dockHandleSide() const override { return ui::LEFT; }
+
   // Signals
   obs::signal<void()> BrushChange;
+  obs::signal<void(const FontInfo&, FontEntry::From)> FontChange;
 
 protected:
   void onInitTheme(ui::InitThemeEvent& ev) override;
@@ -160,6 +173,7 @@ private:
   class AutoSelectLayerField;
   class SymmetryField;
   class SliceFields;
+  class FontSelector;
 
   ZoomButtons* m_zoomButtons;
   SamplingSelector* m_samplingSelector;
@@ -198,6 +212,7 @@ private:
   ui::Label* m_selectBoxHelp;
   SymmetryField* m_symmetry;
   SliceFields* m_sliceFields;
+  FontSelector* m_fontSelector = nullptr;
   obs::scoped_connection m_symmModeConn;
   obs::scoped_connection m_fgColorConn;
   obs::scoped_connection m_bgColorConn;
